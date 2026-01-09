@@ -1,0 +1,41 @@
+{
+  "expo": {
+    "name": "Qualibev",
+    "slug": "Qualibev",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/Png Logos-02.png",
+    "scheme": "myapp",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "infoPlist": {
+        "NFCReaderUsageDescription": "This app requires NFC to verify product authenticity"
+      }
+    },
+    "android": {
+      "permissions": ["android.permission.NFC"],
+      "package": "com.anonymous.boltexponativewind"
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single",
+      "favicon": "./assets/images/Png Logos-02.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-font",
+      "expo-web-browser",
+      [
+        "react-native-nfc-manager",
+        {
+          "nfcPermission": "App uses NFC to verify product authenticity"
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
