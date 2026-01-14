@@ -15,6 +15,7 @@ import Animated, { FadeInDown } from 'react-native-reanimated';
 import { CheckCircle, Package, Building2, MapPin, Hash, FileCheck, Calendar } from 'lucide-react-native';
 import { supabase } from '@/lib/supabase';
 import { LinearGradient } from 'expo-linear-gradient';
+import { getCurrentProduct, clearCurrentProduct } from '@/utils/tempProductStore';
 
 export default function ResultVerified() {
   const router = useRouter();
@@ -30,30 +31,11 @@ export default function ResultVerified() {
 
   const loadLatestVerification = async () => {
     try {
-      const { data: latestLog } = await supabase
-        .from('verification_logs')
-        .select(`
-          *,
-          product:alcohol_products(
-            *,
-            brand:brands(name, manufacturer, country_code)
-          )
-        `)
-        .eq('scanned_by', user?.id)
-        .eq('is_authentic', true)
-        .order('scanned_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      const currentProduct = getCurrentProduct();
 
-      if (latestLog && latestLog.product) {
-        setProduct(latestLog.product);
-
-        const { data: scans } = await supabase
-          .from('verification_logs')
-          .select('id')
-          .eq('verification_id', latestLog.verification_id);
-
-        setScanCount(scans?.length || 1);
+      if (currentProduct) {
+        setProduct(currentProduct);
+        setScanCount(1);
       }
 
       setLoading(false);

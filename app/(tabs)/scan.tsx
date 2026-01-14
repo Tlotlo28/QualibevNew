@@ -20,6 +20,11 @@ import { QrCode, Nfc, X, Keyboard as KeyboardIcon } from 'lucide-react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { supabase } from '@/lib/supabase';
 import NfcManager, { NfcTech, Ndef } from 'react-native-nfc-manager';
+import {
+  findProductByVerificationId,
+  findProductByBatchNumber,
+} from '@/utils/mockProductData';
+import { setCurrentProduct } from '@/utils/tempProductStore';
 
 export default function Scan() {
   const router = useRouter();
@@ -29,6 +34,8 @@ export default function Scan() {
   const [permission, requestPermission] = useCameraPermissions();
   const [scanning, setScanning] = useState(false);
   const [manualCode, setManualCode] = useState('');
+  const [batchNumber, setBatchNumber] = useState('');
+  const [searchType, setSearchType] = useState<'verification' | 'batch'>('verification');
   const [verifying, setVerifying] = useState(false);
   const [nfcSupported, setNfcSupported] = useState(false);
   const [nfcEnabled, setNfcEnabled] = useState(false);
@@ -65,45 +72,42 @@ export default function Scan() {
     }
   };
 
-  const verifyProduct = async (verificationId: string, scanMethod: string) => {
+  const verifyProduct = async (
+    searchValue: string,
+    scanMethod: string,
+    searchBy: 'verification' | 'batch' = 'verification'
+  ) => {
     try {
       setVerifying(true);
 
-      const { data: product, error } = await supabase
-        .from('alcohol_products')
-        .select(`
-          *,
-          brand:brands(name, manufacturer, country_code)
-        `)
-        .eq('verification_id', verificationId)
-        .maybeSingle();
+      const trimmedValue = searchValue.trim();
 
-      if (error) {
-        console.error('Database error:', error);
-        await createScanLog(verificationId, false, scanMethod, null);
-        router.push('/result-counterfeit');
-        return;
+      console.log('Searching for:', { searchBy, trimmedValue });
+
+      let product;
+
+      if (searchBy === 'verification') {
+        product = findProductByVerificationId(trimmedValue);
+      } else {
+        product = findProductByBatchNumber(trimmedValue);
       }
+
+      console.log('Product found:', product ? product.product_name : 'None');
 
       if (!product) {
-        await createScanLog(verificationId, false, scanMethod, null);
+        console.log('No product found');
+        Alert.alert(
+          'Not Found',
+          `No product found with ${searchBy === 'verification' ? 'Verification ID' : 'Batch Number'}: "${trimmedValue}"\n\nPlease check the value and try again.`
+        );
+        await createScanLog(trimmedValue, false, scanMethod, null);
         router.push('/result-counterfeit');
         return;
       }
 
-      const { data: previousScans } = await supabase
-        .from('verification_logs')
-        .select('id')
-        .eq('verification_id', verificationId);
+      const verificationId = product.verification_id;
 
-      const scanCount = previousScans?.length || 0;
-      const maxScans = product.max_scans_allowed || 1;
-
-      if (scanCount >= maxScans) {
-        await createScanLog(verificationId, false, scanMethod, product.id, 'exceeded_scan_limit');
-        router.push('/result-counterfeit');
-        return;
-      }
+      setCurrentProduct(product);
 
       await createScanLog(verificationId, true, scanMethod, product.id);
       router.push('/result-verified');
@@ -160,6 +164,8 @@ export default function Scan() {
   const handleManualEntry = () => {
     setScanType('manual');
     setManualCode('');
+    setBatchNumber('');
+    setSearchType('verification');
   };
 
   const handleNFCScan = async () => {
@@ -265,14 +271,20 @@ export default function Scan() {
   };
 
   const handleManualSubmit = async () => {
-    if (!manualCode.trim()) {
-      Alert.alert('Invalid Input', 'Please enter a verification code');
+    const searchValue = searchType === 'verification' ? manualCode.trim() : batchNumber.trim();
+
+    if (!searchValue) {
+      Alert.alert(
+        'Invalid Input',
+        `Please enter a ${searchType === 'verification' ? 'verification code' : 'batch number'}`
+      );
       return;
     }
 
     setScanType(null);
-    await verifyProduct(manualCode.trim(), 'Manual');
+    await verifyProduct(searchValue, 'Manual', searchType);
     setManualCode('');
+    setBatchNumber('');
   };
 
   return (
@@ -386,18 +398,20 @@ export default function Scan() {
         onRequestClose={() => {
           setScanType(null);
           setManualCode('');
+          setBatchNumber('');
         }}
       >
         <View style={styles.manualOverlay}>
           <View style={[styles.manualModal, { backgroundColor: colors.cardBackground }]}>
             <View style={styles.manualHeader}>
               <Text style={[styles.manualTitle, { color: colors.text }]}>
-                Enter Verification Code
+                Manual Entry
               </Text>
               <TouchableOpacity
                 onPress={() => {
                   setScanType(null);
                   setManualCode('');
+                  setBatchNumber('');
                 }}
               >
                 <X size={24} color={colors.text} />
@@ -405,21 +419,104 @@ export default function Scan() {
             </View>
 
             <Text style={[styles.manualDescription, { color: colors.textSecondary }]}>
-              Type the verification code found on the product label (e.g., VRF-XXXX-XXXX-XXXX)
+              Choose your search method and enter the product information
             </Text>
 
-            <TextInput
-              style={[
-                styles.manualInput,
-                { backgroundColor: colors.background, color: colors.text, borderColor: colors.border },
-              ]}
-              placeholder="VRF-XXXX-XXXX-XXXX"
-              placeholderTextColor={colors.textSecondary}
-              value={manualCode}
-              onChangeText={setManualCode}
-              autoCapitalize="characters"
-              autoCorrect={false}
-            />
+            <View style={styles.searchTypeContainer}>
+              <TouchableOpacity
+                style={[
+                  styles.searchTypeButton,
+                  {
+                    backgroundColor:
+                      searchType === 'verification' ? colors.primary : colors.background,
+                    borderColor: colors.border,
+                  },
+                ]}
+                onPress={() => setSearchType('verification')}
+              >
+                <Text
+                  style={[
+                    styles.searchTypeText,
+                    {
+                      color: searchType === 'verification' ? '#FFFFFF' : colors.text,
+                    },
+                  ]}
+                >
+                  Verification ID
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.searchTypeButton,
+                  {
+                    backgroundColor:
+                      searchType === 'batch' ? colors.primary : colors.background,
+                    borderColor: colors.border,
+                  },
+                ]}
+                onPress={() => setSearchType('batch')}
+              >
+                <Text
+                  style={[
+                    styles.searchTypeText,
+                    {
+                      color: searchType === 'batch' ? '#FFFFFF' : colors.text,
+                    },
+                  ]}
+                >
+                  Batch Number
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {searchType === 'verification' ? (
+              <>
+                <Text style={[styles.inputLabel, { color: colors.text }]}>
+                  Verification Code
+                </Text>
+                <TextInput
+                  style={[
+                    styles.manualInput,
+                    {
+                      backgroundColor: colors.background,
+                      color: colors.text,
+                      borderColor: colors.border,
+                    },
+                  ]}
+                  placeholder="VRF-XXXX-XXXX-XXXX"
+                  placeholderTextColor={colors.textSecondary}
+                  value={manualCode}
+                  onChangeText={setManualCode}
+                  autoCapitalize="characters"
+                  autoCorrect={false}
+                />
+              </>
+            ) : (
+              <>
+                <Text style={[styles.inputLabel, { color: colors.text }]}>Batch Number</Text>
+                <Text style={[styles.inputHint, { color: colors.textSecondary }]}>
+                  Enter the numeric batch number from the product label
+                </Text>
+                <TextInput
+                  style={[
+                    styles.manualInput,
+                    {
+                      backgroundColor: colors.background,
+                      color: colors.text,
+                      borderColor: colors.border,
+                    },
+                  ]}
+                  placeholder="e.g., 6001452631006"
+                  placeholderTextColor={colors.textSecondary}
+                  value={batchNumber}
+                  onChangeText={setBatchNumber}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  keyboardType="numeric"
+                />
+              </>
+            )}
 
             <TouchableOpacity
               style={[styles.submitButton, { backgroundColor: colors.primary }]}
@@ -602,6 +699,33 @@ const styles = StyleSheet.create({
     fontSize: typography.fontSize.sm,
     marginBottom: spacing.lg,
     lineHeight: 20,
+  },
+  searchTypeContainer: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginBottom: spacing.lg,
+  },
+  searchTypeButton: {
+    flex: 1,
+    padding: spacing.sm,
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    alignItems: 'center',
+  },
+  searchTypeText: {
+    fontFamily: typography.fontFamily.semiBold,
+    fontSize: typography.fontSize.sm,
+  },
+  inputLabel: {
+    fontFamily: typography.fontFamily.semiBold,
+    fontSize: typography.fontSize.sm,
+    marginBottom: spacing.xs,
+  },
+  inputHint: {
+    fontFamily: typography.fontFamily.regular,
+    fontSize: typography.fontSize.xs,
+    marginBottom: spacing.sm,
+    fontStyle: 'italic',
   },
   manualInput: {
     padding: spacing.md,
